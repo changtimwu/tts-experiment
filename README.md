@@ -58,6 +58,59 @@ node gen-corpus.js
 
 Output is saved to `corpus.txt` (~690 sentences total). Progress is tracked in `corpus-progress.json` — if the run is interrupted, re-running will skip already-completed topics and resume from where it left off.
 
+## Voice Synthesis (corpus → dataset)
+
+`corpus-to-voices.js` converts a text corpus into a [Piper](https://github.com/rhasspy/piper)-ready LJSpeech dataset by synthesizing each sentence with msedge-tts and transcoding to WAV via ffmpeg.
+
+**Requires:** `ffmpeg` (`sudo apt install ffmpeg`)
+
+### Output layout
+
+```
+dataset/
+  wavs/
+    00001.wav      # 22050 Hz, 16-bit mono PCM
+    00002.wav
+    …
+  metadata.csv     # LJSpeech format: stem|sentence
+  progress.json    # resume state (safe to delete when done)
+```
+
+### Run
+
+```bash
+node corpus-to-voices.js
+```
+
+With explicit options:
+
+```bash
+node corpus-to-voices.js \
+  --input  corpus.txt            \
+  --outdir ./dataset             \
+  --voice  zh-TW-HsiaoChenNeural
+```
+
+| Option | Short | Default |
+|---|---|---|
+| `--input` | `-i` | `./corpus.txt` |
+| `--outdir` | `-o` | `./dataset` |
+| `--voice` | `-v` | `zh-TW-HsiaoChenNeural` |
+
+Progress is saved after each sentence — re-running resumes from where it left off.
+
+Available zh-TW voices: `zh-TW-HsiaoChenNeural` (female), `zh-TW-HsiaoYuNeural` (female), `zh-TW-YunJheNeural` (male).
+
+## Full Pipeline
+
+```bash
+# 1. Generate corpus from topics
+node gen-corpus.js          # → corpus.txt (~690 sentences)
+
+# 2. Synthesize to WAV dataset
+node corpus-to-voices.js    # → dataset/wavs/*.wav + metadata.csv
+```
+
 ## Notes
 
 - TTS examples require a network connection (calls the Microsoft Edge Read Aloud API)
