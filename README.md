@@ -111,6 +111,55 @@ node gen-corpus.js          # → corpus.txt (~690 sentences)
 node corpus-to-voices.js    # → dataset/wavs/*.wav + metadata.csv
 ```
 
+## Piper Training Environment (Jetson)
+
+`Dockerfile.piper-train` builds a Docker image for fine-tuning Piper TTS on Jetson Orin (L4T R36.4 / JetPack 6.1, CUDA 12.8, SM87).
+
+It layers on `dustynv/pytorch:2.6-r36.4.0-cu128-24.04` and transplants `piper_phonemize` from `dustynv/piper-tts:r36.4.0-cu128-24.04` (the only source of a pre-built cp312/aarch64 binary with espeak-ng 1.52).
+
+### Build
+
+```bash
+docker build -f Dockerfile.piper-train -t piper-train:jetson .
+```
+
+### Run training
+
+```bash
+docker run --rm --runtime nvidia \
+  -v $PWD/dataset:/dataset \
+  -v $PWD/training:/training \
+  -v $PWD/checkpoints:/checkpoints \
+  piper-train:jetson bash
+```
+
+Inside the container, the three training steps are:
+
+```bash
+# 1. Preprocess dataset → phoneme IDs
+python3 -m piper_train.preprocess \
+  --language zh \
+  --input-dir /dataset \
+  --output-dir /training \
+  --dataset-format ljspeech \
+  --single-speaker \
+  --sample-rate 22050
+
+# 2. Fine-tune from a zh_CN checkpoint
+python3 -m piper_train \
+  --dataset-dir /training \
+  --accelerator gpu --devices 1 \
+  --batch-size 16 \
+  --max_epochs 10000 \
+  --resume_from_single_speaker_checkpoint /checkpoints/pretrained.ckpt \
+  --checkpoint-epochs 10 \
+  --precision 32
+
+# 3. Export to ONNX for inference
+python3 -m piper_train.export_onnx /checkpoints/last.ckpt /checkpoints/model.onnx
+cp /training/config.json /checkpoints/model.onnx.json
+```
+
 ## Notes
 
 - TTS examples require a network connection (calls the Microsoft Edge Read Aloud API)

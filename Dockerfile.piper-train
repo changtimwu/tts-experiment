@@ -1,0 +1,55 @@
+FROM dustynv/pytorch:2.6-r36.4.0-cu128-24.04
+
+# Copy piper-phonemize (Python 3.12, already compiled) from the piper-tts image
+COPY --from=dustynv/piper-tts:r36.4.0-cu128-24.04 \
+    /opt/venv/lib/python3.12/site-packages/piper_phonemize \
+    /opt/venv/lib/python3.12/site-packages/piper_phonemize
+COPY --from=dustynv/piper-tts:r36.4.0-cu128-24.04 \
+    /opt/venv/lib/python3.12/site-packages/piper_phonemize_cpp.cpython-312-aarch64-linux-gnu.so \
+    /opt/venv/lib/python3.12/site-packages/piper_phonemize_cpp.cpython-312-aarch64-linux-gnu.so
+COPY --from=dustynv/piper-tts:r36.4.0-cu128-24.04 \
+    /opt/venv/lib/python3.12/site-packages/piper_phonemize-1.2.0.dist-info \
+    /opt/venv/lib/python3.12/site-packages/piper_phonemize-1.2.0.dist-info
+
+# Copy runtime libs and data from piper-tts
+COPY --from=dustynv/piper-tts:r36.4.0-cu128-24.04 /usr/local/piper_phonemize /usr/local/piper_phonemize
+COPY --from=dustynv/piper-tts:r36.4.0-cu128-24.04 /usr/local/lib/libonnxruntime.so.1.22.0 /usr/local/lib/libonnxruntime.so.1.22.0
+COPY --from=dustynv/piper-tts:r36.4.0-cu128-24.04 /usr/local/share/espeak-ng-data /usr/local/share/espeak-ng-data
+
+# System deps (apt installs espeak-ng 1.50 — we overwrite it below)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        espeak-ng libespeak-ng-dev \
+        libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Overwrite apt's espeak-ng with piper's custom build (has espeak_TextToPhonemesWithTerminator)
+# Must happen AFTER apt so apt doesn't clobber it
+COPY --from=dustynv/piper-tts:r36.4.0-cu128-24.04 \
+    /usr/local/lib/libespeak-ng.so.1.1.51 \
+    /lib/aarch64-linux-gnu/libespeak-ng.so.1.1.51
+
+RUN ln -sf /usr/local/lib/libonnxruntime.so.1.22.0 /usr/local/lib/libonnxruntime.so.1 && \
+    ln -sf /usr/local/lib/libonnxruntime.so.1.22.0 /usr/local/lib/libonnxruntime.so && \
+    ldconfig
+
+# Override the Jetson-specific pip index (offline) back to standard PyPI
+ENV PIP_INDEX_URL=https://pypi.org/simple
+
+# Python deps — install lightning with --no-deps to keep torch 2.6 intact
+RUN pip install --no-deps "pytorch-lightning==1.9.5" && \
+    pip install \
+        "lightning-utilities>=0.6.0" \
+        "PyYAML>=5.4" \
+        "torchmetrics>=0.7.0" \
+        "tqdm>=4.57.0" \
+        "numpy>=1.19.0" \
+        "librosa>=0.9.2,<1" \
+        "onnxruntime>=1.11.0" \
+        "cython>=0.29.0,<1" \
+        "tensorboard"
+
+# Clone piper and install piper_train (--no-deps skips torch<2 constraint)
+RUN git clone --depth 1 https://github.com/rhasspy/piper.git /opt/piper && \
+    pip install --no-deps -e /opt/piper/src/python
+
+WORKDIR /work
